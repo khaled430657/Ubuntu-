@@ -1,0 +1,75 @@
+name: CI Build Linux
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Update and Install Desktop Environment (XFCE & XRDP)
+        run: |
+          sudo apt-get update
+          # تثبيت واجهة XFCE4 (خفيفة وسريعة) وخدمة XRDP
+          sudo apt-get install -y xfce4 xfce4-goodies xrdp
+          
+          # إعداد XRDP لاستخدام XFCE
+          echo "xfce4-session" > ~/.xsession
+          sudo sed -i 's/3389/3389/g' /etc/xrdp/xrdp.ini
+          
+          # التأكد من أن الخدمة تعمل
+          sudo service xrdp start
+
+      - name: Create RDP User with Secure Password
+        id: create_user
+        run: |
+          # إنشاء اسم مستخدم
+          USERNAME="linux_rdp"
+          
+          # توليد كلمة مرور قوية وعشوائية باستخدام openssl
+          PASSWORD=$(openssl rand -base64 12)
+          
+          # إنشاء المستخدم وإضافته لمجموعة sudo
+          sudo useradd -m -s /bin/bash $USERNAME
+          echo "$USERNAME:$PASSWORD" | sudo chpasswd
+          sudo usermod -aG sudo $USERNAME
+          
+          # حفظ البيانات في متغيرات البيئة لاستخدامها لاحقاً
+          echo "RDP_USER=$USERNAME" >> $env:GITHUB_ENV
+          echo "RDP_PASS=$PASSWORD" >> $env:GITHUB_ENV
+          
+          # (اختياري) إعداد جلسة XFCE للمستخدم الجديد
+          sudo -u $USERNAME sh -c 'echo "xfce4-session" > /home/linux_rdp/.xsession'
+
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Establish Tailscale Connection
+        run: |
+          # تشغيل Tailscale باستخدام مفتاح المصادقة
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-linux-runner-$GITHUB_RUN_ID
+          
+          # جلب عنوان IP الخاص بـ Tailscale
+          TS_IP=$(tailscale ip -4)
+          echo "TAILSCALE_IP=$TS_IP" >> $env:GITHUB_ENV
+
+      - name: Maintain Connection & Display Info
+        run: |
+          echo "=========================================="
+          echo "   LINUX RDP ACCESS DETAILS"
+          echo "=========================================="
+          echo "IP Address (Tailscale): $TAILSCALE_IP"
+          echo "Username: linux_rdp"
+          echo "Password: $RDP_PASS"
+          echo "=========================================="
+          echo "RDP Server is running on port 3389"
+          echo "Use 'Remmina' or Windows 'Remote Desktop Connection' to connect."
+          
+          # حلقة لا نهائية لإبقاء السيرفر يعمل
+          while true; do
+            sleep 300
+            echo "[$(date)] RDP Active - Runner is alive..."
+          done
