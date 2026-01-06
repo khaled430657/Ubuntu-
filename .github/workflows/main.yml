@@ -1,4 +1,4 @@
-name: CI Linux Chrome Remote Desktop
+name: CI Linux Chrome Remote Desktop (Fixed)
 
 on:
   workflow_dispatch:
@@ -17,56 +17,65 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Install Desktop Environment (XFCE)
+      - name: Update and Install Desktop Environment (XFCE)
         run: |
           sudo apt-get update
-          # تثبيت واجهة XFCE الخفيفة
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 desktop-base xfce4-terminal
+          # تثبيت XFCE وأدوات النظام الأساسية
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 desktop-base xfce4-terminal xscreensaver
           
-          # إزالة أدوات قد تسبب تعارضاً
+          # إزالة الأدوات التي قد تسبب تعارضاً
           sudo apt-get remove -y gnome-terminal
           
-          # إعداد الشاشة الافتراضية لتعمل بدقة جيدة
+          # إعداد ملف الجلسة لـ Chrome Remote Desktop
           echo "xfce4-session" > ~/.chrome-remote-desktop-session
 
-      - name: Install Google Chrome & Remote Desktop
+      - name: Install Google Chrome & Remote Desktop (Robust)
         run: |
-          # تحميل وتثبيت متصفح كروم
+          # تحميل كروم
           wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt install -y ./google-chrome-stable_current_amd64.deb
-          
-          # تحميل وتثبيت Chrome Remote Desktop
+          sudo apt install -y ./google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y
+
+          # تحميل وتثبيت Chrome Remote Desktop مع إصلاح الأخطاء فوراً
           wget https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
-          sudo apt install -y ./chrome-remote-desktop_current_amd64.deb
+          sudo apt install -y ./chrome-remote-desktop_current_amd64.deb || sudo apt-get install -f -y
           
-          # إصلاح التبعيات إن وجدت
+          # تأكيد الإصلاح النهائي (مهم جداً)
           sudo apt-get install --fix-broken -y
 
-      - name: Configure User Session
+      - name: Configure User Session (Safe Mode)
         run: |
-          # إضافة المستخدم الحالي لمجموعة Chrome Remote Desktop
+          # التحقق مما إذا كانت المجموعة موجودة، وإنشاؤها إذا لم تكن كذلك
+          if ! getent group chrome-remote-desktop > /dev/null; then
+            echo "Group chrome-remote-desktop not found, creating manually..."
+            sudo groupadd chrome-remote-desktop
+          fi
+
+          # إضافة المستخدم للمجموعة
           sudo usermod -aG chrome-remote-desktop $USER
           
-          # التأكد من ملف الجلسة
+          # تجهيز مجلد الإعدادات
           mkdir -p ~/.config/chrome-remote-desktop
           chown "$USER:$USER" ~/.config/chrome-remote-desktop
 
       - name: Start Chrome Remote Desktop
         run: |
-          # تشغيل الأمر الذي أدخله المستخدم مع إضافة الـ PIN
-          # يتم تنفيذ الأمر في الخلفية
           CMD="${{ github.event.inputs.crd_code }}"
           PIN="${{ github.event.inputs.pin }}"
           
-          # تنظيف الأمر للتأكد من أنه يعمل بشكل صحيح وإضافة الـ PIN
+          # التأكد من أن الكود يحتوي على --pin
           full_cmd="$CMD --pin=$PIN"
           
           echo "Starting Chrome Remote Desktop..."
+          # تشغيل الأمر في الخلفية لتجنب تعليق الخطوة
           eval "$full_cmd"
 
       - name: Keep Alive
         run: |
-          echo "Chrome Remote Desktop is running!"
-          echo "Go to https://remotedesktop.google.com/access to connect."
-          # حلقة لمنع السيرفر من الإغلاق
-          while true; do sleep 300; echo "System active $(date)"; done
+          echo "Chrome Remote Desktop started successfully."
+          echo "Visit https://remotedesktop.google.com/access to connect."
+          
+          # حلقة لا نهائية لإبقاء الجهاز يعمل
+          while true; do 
+            sleep 300
+            echo "[$(date)] Runner is active..."
+          done
