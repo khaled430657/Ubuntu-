@@ -1,31 +1,37 @@
-name: CI Build Linux XFCE Fixed
+name: CI Build Linux XFCE (Final Fix)
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp-xfce:
+  secure-rdp-xfce-fix:
     runs-on: ubuntu-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Update and Install XFCE (Fixed)
+      - name: Update and Install XFCE & Dependencies
         run: |
           sudo apt-get update
-          # تثبيت XFCE مع حزمة dbus-x11 الضرورية جداً لمنع خطأ failsafe
+          # تثبيت الواجهة و dbus-x11 (مهم جداً للحل)
           sudo apt-get install -y xfce4 xfce4-goodies xrdp dbus-x11 x11-xserver-utils
           
-          # تنظيف إعدادات XRDP القديمة وتجهيزها لـ XFCE
-          sudo sed -i.bak '/test -x/d' /etc/xrdp/startwm.sh
-          sudo sed -i.bak '/exec/d' /etc/xrdp/startwm.sh
+          # ---------------------------------------------------
+          # الخطوة السحرية لإصلاح خطأ Failsafe / D-Bus
+          # نقوم بمسح ملف البدء القديم وإنشاء واحد جديد ونظيف تماماً
+          # ---------------------------------------------------
+          sudo rm /etc/xrdp/startwm.sh
           
-          # إجبار XRDP على تشغيل XFCE4 عند البدء
-          echo "startxfce4" | sudo tee -a /etc/xrdp/startwm.sh
+          # كتابة ملف تشغيل جديد يقوم بإلغاء المتغيرات المتعارضة
+          echo "#!/bin/sh" | sudo tee /etc/xrdp/startwm.sh
+          echo "unset DBUS_SESSION_BUS_ADDRESS" | sudo tee -a /etc/xrdp/startwm.sh
+          echo "unset XDG_RUNTIME_DIR" | sudo tee -a /etc/xrdp/startwm.sh
+          echo "exec startxfce4" | sudo tee -a /etc/xrdp/startwm.sh
+          
+          # إعطاء صلاحية التنفيذ
           sudo chmod +x /etc/xrdp/startwm.sh
           
-          # تعديل المنفذ
+          # تعديل المنفذ وتشغيل الخدمة
           sudo sed -i 's/3389/3389/g' /etc/xrdp/xrdp.ini
-          
           sudo service xrdp start
 
       - name: Create RDP User
@@ -38,14 +44,12 @@ jobs:
           echo "$USERNAME:$PASSWORD" | sudo chpasswd
           sudo usermod -aG sudo $USERNAME
           
+          # حفظ البيانات
           echo "RDP_USER=$USERNAME" >> $GITHUB_ENV
           echo "RDP_PASS=$PASSWORD" >> $GITHUB_ENV
           
-          # إعداد ملف الجلسة للمستخدم (مهم جداً)
+          # إنشاء ملف الجلسة للمستخدم كإجراء احتياطي
           sudo -u $USERNAME sh -c 'echo "xfce4-session" > /home/linux_rdp/.xsession'
-          # إضافة متغيرات بيئة لإصلاح أي مشاكل في العرض
-          sudo -u $USERNAME sh -c 'echo "export GL_VENDOR=Mesa" >> /home/linux_rdp/.xsessionrc'
-          sudo -u $USERNAME sh -c 'echo "export XDG_SESSION_TYPE=x11" >> /home/linux_rdp/.xsessionrc'
 
       - name: Install Tailscale
         run: |
@@ -54,7 +58,7 @@ jobs:
       - name: Establish Tailscale Connection
         run: |
           # تأكد أن المفتاح في Secrets صالح
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-linux-xfce-$GITHUB_RUN_ID
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-linux-xfce-fix-$GITHUB_RUN_ID
           
           TS_IP=$(tailscale ip -4)
           echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
@@ -62,16 +66,15 @@ jobs:
       - name: Maintain Connection & Display Info
         run: |
           echo "=========================================="
-          echo "   LINUX (XFCE) RDP ACCESS DETAILS"
+          echo "   LINUX (XFCE) FIXED RDP DETAILS"
           echo "=========================================="
           echo "IP Address (Tailscale): $TAILSCALE_IP"
           echo "Username: $RDP_USER"
           echo "Password: $RDP_PASS"
           echo "=========================================="
-          echo "RDP Server is running on port 3389"
-          echo "Use 'Remmina' or Windows 'Remote Desktop Connection' to connect."
+          echo "NOTE: If you see a black screen initially, wait 10 seconds."
           
           while true; do
             sleep 300
-            echo "[$(date)] RDP Active - Runner is alive..."
+            echo "[$(date)] RDP Active..."
           done
