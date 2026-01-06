@@ -1,54 +1,51 @@
-name: CI Build Linux GNOME
+name: CI Build Linux XFCE Fixed
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp-gnome:
+  secure-rdp-xfce:
     runs-on: ubuntu-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Update and Install GNOME Desktop & XRDP
+      - name: Update and Install XFCE (Fixed)
         run: |
           sudo apt-get update
-          # تثبيت واجهة أوبونتو الرسمية (GNOME)
-          # ملاحظة: هذا التثبيت حجمه كبير وقد يستغرق وقتاً
-          sudo apt-get install -y ubuntu-desktop xrdp
+          # تثبيت XFCE مع حزمة dbus-x11 الضرورية جداً لمنع خطأ failsafe
+          sudo apt-get install -y xfce4 xfce4-goodies xrdp dbus-x11 x11-xserver-utils
           
-          # إصلاح مشاكل الصلاحيات الشائعة في XRDP مع GNOME
-          sudo adduser xrdp ssl-cert
+          # تنظيف إعدادات XRDP القديمة وتجهيزها لـ XFCE
+          sudo sed -i.bak '/test -x/d' /etc/xrdp/startwm.sh
+          sudo sed -i.bak '/exec/d' /etc/xrdp/startwm.sh
+          
+          # إجبار XRDP على تشغيل XFCE4 عند البدء
+          echo "startxfce4" | sudo tee -a /etc/xrdp/startwm.sh
+          sudo chmod +x /etc/xrdp/startwm.sh
+          
+          # تعديل المنفذ
           sudo sed -i 's/3389/3389/g' /etc/xrdp/xrdp.ini
           
-          # السماح لجلسة Gnome بالعمل مع XRDP
-          sudo sed -i 's/allowed_users=console/allowed_users=anybody/g' /etc/X11/Xwrapper.config
-
-          # تشغيل الخدمة
           sudo service xrdp start
 
-      - name: Create RDP User with GNOME Config
+      - name: Create RDP User
         id: create_user
         run: |
           USERNAME="linux_rdp"
           PASSWORD=$(openssl rand -base64 12)
           
-          # إنشاء المستخدم
           sudo useradd -m -s /bin/bash $USERNAME
           echo "$USERNAME:$PASSWORD" | sudo chpasswd
           sudo usermod -aG sudo $USERNAME
           
-          # حفظ البيانات بشكل صحيح في متغيرات البيئة
           echo "RDP_USER=$USERNAME" >> $GITHUB_ENV
           echo "RDP_PASS=$PASSWORD" >> $GITHUB_ENV
           
-          # --- الخطوة الحاسمة لتشغيل GNOME وإصلاح خطأ Failsafe ---
-          # إنشاء ملف .xsession يجبر النظام على تشغيل gnome-session
-          sudo -u $USERNAME sh -c 'echo "gnome-session" > /home/linux_rdp/.xsession'
-          
-          # إعدادات إضافية لتحسين التوافق مع RDP
-          sudo -u $USERNAME sh -c 'echo "export GNOME_SHELL_SESSION_MODE=ubuntu" > /home/linux_rdp/.xsessionrc'
-          sudo -u $USERNAME sh -c 'echo "export XDG_CURRENT_DESKTOP=ubuntu:GNOME" >> /home/linux_rdp/.xsessionrc'
-          sudo -u $USERNAME sh -c 'echo "export XDG_CONFIG_DIRS=/etc/xdg/xdg-ubuntu:/etc/xdg" >> /home/linux_rdp/.xsessionrc'
+          # إعداد ملف الجلسة للمستخدم (مهم جداً)
+          sudo -u $USERNAME sh -c 'echo "xfce4-session" > /home/linux_rdp/.xsession'
+          # إضافة متغيرات بيئة لإصلاح أي مشاكل في العرض
+          sudo -u $USERNAME sh -c 'echo "export GL_VENDOR=Mesa" >> /home/linux_rdp/.xsessionrc'
+          sudo -u $USERNAME sh -c 'echo "export XDG_SESSION_TYPE=x11" >> /home/linux_rdp/.xsessionrc'
 
       - name: Install Tailscale
         run: |
@@ -56,8 +53,8 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          # تأكد من تحديث المفتاح في GitHub Secrets
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-linux-gnome-$GITHUB_RUN_ID
+          # تأكد أن المفتاح في Secrets صالح
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-linux-xfce-$GITHUB_RUN_ID
           
           TS_IP=$(tailscale ip -4)
           echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
@@ -65,14 +62,14 @@ jobs:
       - name: Maintain Connection & Display Info
         run: |
           echo "=========================================="
-          echo "   LINUX (GNOME) RDP ACCESS DETAILS"
+          echo "   LINUX (XFCE) RDP ACCESS DETAILS"
           echo "=========================================="
           echo "IP Address (Tailscale): $TAILSCALE_IP"
           echo "Username: $RDP_USER"
           echo "Password: $RDP_PASS"
           echo "=========================================="
           echo "RDP Server is running on port 3389"
-          echo "Wait a few seconds after login for GNOME to load..."
+          echo "Use 'Remmina' or Windows 'Remote Desktop Connection' to connect."
           
           while true; do
             sleep 300
